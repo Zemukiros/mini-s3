@@ -1,0 +1,90 @@
+# Whole cluster on one machine:
+#   1 Postgres, 1 API server, 4 storage nodes, 1 repair worker.
+# Why 4 nodes for 3 copies? With exactly 3 nodes every object lives on every
+# node, so placement is trivial, and when one dies there's nowhere to rebuild
+# the third copy. A 4th node makes both the ring and the repair real.
+# Only the API is published to your host; storage nodes are reachable
+# only on the internal Docker network, like a real private subnet.
+
+x-storage: &storage
+  image: mini-s3:latest
+  restart: "no"
+  depends_on: [api]
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: minis3
+      POSTGRES_USER: minis3
+      POSTGRES_PASSWORD: minis3
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minis3 -d minis3"]
+      interval: 2s
+      retries: 20
+
+  api:
+    build: .
+    image: mini-s3:latest
+    ports: ["8080:8080"]
+    environment:
+      SPRING_PROFILES_ACTIVE: api
+      DB_URL: jdbc:postgresql://postgres:5432/minis3
+      API_KEY: ${API_KEY:-dev-key}
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  storage-1:
+    <<: *storage
+    environment:
+      SPRING_PROFILES_ACTIVE: storage
+      NODE_ID: node-1
+      NODE_URL: http://storage-1:9001
+      DATA_DIR: /data
+      API_URL: http://api:8080
+    volumes: [data1:/data]
+
+  storage-2:
+    <<: *storage
+    environment:
+      SPRING_PROFILES_ACTIVE: storage
+      NODE_ID: node-2
+      NODE_URL: http://storage-2:9001
+      DATA_DIR: /data
+      API_URL: http://api:8080
+    volumes: [data2:/data]
+
+  storage-3:
+    <<: *storage
+    environment:
+      SPRING_PROFILES_ACTIVE: storage
+      NODE_ID: node-3
+      NODE_URL: http://storage-3:9001
+      DATA_DIR: /data
+      API_URL: http://api:8080
+    volumes: [data3:/data]
+
+  storage-4:
+    <<: *storage
+    environment:
+      SPRING_PROFILES_ACTIVE: storage
+      NODE_ID: node-4
+      NODE_URL: http://storage-4:9001
+      DATA_DIR: /data
+      API_URL: http://api:8080
+    volumes: [data4:/data]
+
+  worker:
+    image: mini-s3:latest
+    environment:
+      SPRING_PROFILES_ACTIVE: worker
+      DB_URL: jdbc:postgresql://postgres:5432/minis3
+    depends_on: [api]
+
+volumes:
+  pgdata:
+  data1:
+  data2:
+  data3:
+  data4:
